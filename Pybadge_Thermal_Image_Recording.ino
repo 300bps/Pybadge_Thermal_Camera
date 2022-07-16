@@ -671,10 +671,17 @@ void recallLastBMP(uint16_t bgColor) {  // Display 8-bit values left in buffer f
 
   setBackdrop(bgColor, 4);  // Clear screen, just a color palette & "A:EXIT" in the BG
 
-  for(int counter1 = 0; counter1 < 24; ++counter1) {  // Redraw using leftover red byte values, not yet overwritten
-    for(int counter2 = 0 ; counter2 < 32 ; ++counter2) {
-      arcada.display->fillRect(16 + counter2 * 4, 92 - counter1 * 4, 4, 4,
-                   colorPal[(uint16_t)pixelArray[3 * (32 * counter1 + counter2) + 2]]);
+  // Restore values from pixelArray back to mlx buffer for interpolation
+  for (uint16_t u16Index = 0; u16Index < MLX_ROWS*MLX_COLS; u16Index++)      
+    mlx90640To[u16Index] = pixelArray[3*u16Index];
+
+  // Perform bilinear interpolation (quadruples the number of active display points: (32x24) -> (64x48))
+  bilinear_interpolation(mlx90640To, terpArray); 
+
+  // NOT MIRRORED: Display the interpolated results
+  for(int y = 0; y < TERP_ROWS; ++y) {
+    for(int x = 0 ; x < TERP_COLS; x++) {
+      arcada.display->fillRect(16 + x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)terpArray[x][y]]);
     }
   }
 
