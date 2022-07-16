@@ -21,7 +21,7 @@
   Ver.  7 - Port to Adafruit PyBadge using Arcada library.  Use simulated data while awaiting hardware release
   Ver.  8 - Convert menu to scrolling style and add settings for emissivity and frame rate, more if feasible.
   Ver.  9 - Bring in the current Adafruit library and read a real sensor.
-  Ver. 10 - Added bilinear interpolation to smooth and quadruple active pixel count (DMS)
+  Ver. 10 - Added bilinear interpolation to smooth and quadruple active pixel count and "predator vision" palette. (DMS)
 */
 
 #include <Adafruit_MLX90640.h>
@@ -345,7 +345,12 @@ void loop()
     arcada.display->setTextColor(0x0000);
   arcada.display->print(celsiusFlag ? mlx90640To[400] : mlx90640To[400] * 1.8 + 32.0);  // Pixel 12 * 32 + 16
 
-  markColor = 0x0600;    // Deep green color to draw onscreen cross markers
+  // On-screen cross markers
+  if (paletteNum == 1)
+    markColor = 0xFFFF;   // Use white for predator palette
+  else
+    markColor = 0x0600;   // Deep green
+  
   if(markersOn) {        // Show markers?
     if(mirrorFlag) {     // ...over a mirrored display?
       arcada.display->drawFastHLine(156 - (( lowAddr % 32) * 4 + 16), 93 - 4 * ( lowAddr / 32), 4, markColor); // Color crosses mark cold pixel,
