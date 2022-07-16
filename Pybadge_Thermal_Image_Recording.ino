@@ -242,7 +242,7 @@ void loop()
 
 
   // Second pass: Scale the float values down to 8-bit and plot colormapped pixels
-  // NOTE: At the highest framerate (16fps), fillRect draw routine becomes the bottleneck since drawing 4X the number of squares as when uninterpolated (3072 vs 768) - so use orignal routine for speed
+  // NOTE: At the highest framerate, fillRect draw routine becomes the bottleneck since drawing 4X the number of squares as when uninterpolated (3072 vs 768) - so use orignal routine for speed
   if (frameRate < 5) {    
     // Perform bilinear interpolation (quadruples the number of active display points: (32x24) -> (64x48))
     bilinear_interpolation(mlx90640To, terpArray); 
@@ -894,8 +894,9 @@ void menuLines(int lineNumber, int scrollPos) {  // Screen print a single line i
         arcada.display->print(mirrorFlag ? "MIRRORED" : "FORWARD");
         break;
       case 7:
+        // NOTE: frameRate variable is MLX90640 sample framerate (which is 2X the display framerate), so convert to display framerate
         arcada.display->print("Frame rate - ");
-        arcada.display->print((float)(1 << frameRate) * 0.5);
+        arcada.display->print((float)(1 << frameRate) * 0.25);
         arcada.display->print(" FPS");
         break;
       case 8:
