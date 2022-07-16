@@ -27,15 +27,10 @@
 #include <Adafruit_MLX90640.h>
 #include <stdint.h>
 #include "Adafruit_Arcada.h"
-Adafruit_MLX90640 mlx;
-Adafruit_Arcada arcada;
 
 #if !defined(USE_TINYUSB)
   #warning "Compile with TinyUSB selected!"
 #endif
-
-File myFile;
-
 
 #define DE_BOUNCE 200
   // Wait this many msec between button clicks
@@ -51,10 +46,10 @@ File myFile;
 #define CFG_FLNAME "/config.ini"
 #define MAX_SERIAL 999
 
-#define MLX_ROWS    ((uint8_t)24)   // Number of sensor rows
-#define MLX_COLS    ((uint8_t)32)   // Number of sensor columns
-#define TERP_ROWS   (2*MLX_ROWS)    // Number of interpolated rows
-#define TERP_COLS   (2*MLX_COLS)    // Number of interpolated cols
+#define MLX_ROWS ((uint8_t)24)   // Number of sensor rows
+#define MLX_COLS ((uint8_t)32)   // Number of sensor columns
+#define TERP_ROWS (2*MLX_ROWS)   // Number of interpolated rows
+#define TERP_COLS (2*MLX_COLS)   // Number of interpolated cols
 
 
 // BMP File Header, little end first, Photoshop ver.
@@ -101,6 +96,10 @@ const PROGMEM uint8_t snowIcon[] = {
 0x15, 0x00, 0x4E, 0x40, 0xC4, 0x60, 0x75, 0xC0, 0x9F, 0x20, 0x0E, 0x00,
 0x0E, 0x00, 0x9F, 0x20, 0x75, 0xC0, 0xC4, 0x60, 0x4E, 0x40, 0x15, 0x00};
 
+
+Adafruit_MLX90640 mlx;
+Adafruit_Arcada arcada;
+File myFile;
 float mlx90640To[MLX_ROWS*MLX_COLS];        // Here we receive the float vals acquired from MLX90640
 uint8_t pixelArray[2304];                   // BMP image body, 32 pixels * 24 rows * 3 bytes
 float terpArray[TERP_COLS][TERP_ROWS];      // Destination for interpolated image
@@ -121,6 +120,10 @@ boolean mirrorFlag = false, celsiusFlag = false, markersOn = true,
         save1frame = false, recordingInProg = false, buttonActive = false;
 float battAverage = 0.0, colorLow = 0.0, colorHigh = 100.0;        // Values for managing color range
 volatile boolean clickFlagMenu = false, clickFlagSelect = false;   // Volatiles for timer callback handling
+
+
+void bilinear_interpolation(float pfSource[], float pfDest[TERP_COLS][TERP_ROWS]);
+
 
 void setup()
 {
@@ -190,53 +193,13 @@ void setup()
 }
 
 
-
-void bilinear_interpolation(float pfSource[], float pfDest[TERP_COLS][TERP_ROWS])
-{
-  float fAvg;
-  
-  // Copy source into dest making space for the intermediate pixels
-  for (uint8_t u8Row = 0; u8Row < TERP_ROWS; u8Row+= 2) {    
-    for (uint8_t u8Col = 0; u8Col < TERP_COLS; u8Col+= 2)
-      pfDest[u8Col][u8Row] = pfSource[MLX_COLS*(u8Row>>1) + (u8Col>>1)];
-  }
-
-  // Interpolate rows (horizontal average of points on either side)
-  for (uint8_t u8Row = 0; u8Row < TERP_ROWS; u8Row+= 2) {
-    for (uint8_t u8Col = 1; u8Col < TERP_COLS-1; u8Col+= 2) {
-      // Compute average from points on either side
-      fAvg = (pfDest[u8Col-1][u8Row] + pfDest[u8Col+1][u8Row])/2.0;      
-      pfDest[u8Col][u8Row] = fAvg;
-    }  
-    
-    // Duplicate the last horizontal point since average can't be computed for it
-    pfDest[TERP_COLS-1][u8Row] = fAvg;
-  }
-
-  // Interpolate columns (vertical average of points on either side)
-  for (uint8_t u8Row = 1; u8Row < TERP_ROWS-1; u8Row+= 2) {
-    for (uint8_t u8Col = 0; u8Col < TERP_COLS; u8Col++) {
-      // Compute average of points above and below
-      fAvg = (pfDest[u8Col][u8Row-1] + pfDest[u8Col][u8Row+1])/2.0;            
-      pfDest[u8Col][u8Row] = fAvg;
-    }  
-  }  
-
-  // Duplicate the last row since average can't be computed for it
-  for (uint8_t u8Col = 0; u8Col < TERP_COLS; u8Col++)
-    pfDest[u8Col][TERP_ROWS-1] = pfDest[u8Col][TERP_ROWS-2];      
-}
-
-
 void loop()
 {
-  uint32_t time_1 = millis(); // $$ DEBUG
-  
   static uint32_t frameCounter = 0;
   float scaledPix, highPix, lowPix;
   uint16_t markColor;
 
-// Show the battery level indicator, 3.7V to 3.3V represented by a 7 segment bar
+  // Show the battery level indicator, 3.7V to 3.3V represented by a 7 segment bar
   battAverage = battAverage * 0.95 + arcada.readBatterySensor() * 0.05; // *Gradually* track battery level
   highPix = (int)constrain((battAverage - 3.3) * 15.0, 0.0, 6.0) + 1;   // Scale it to a 7-segment bar
   markColor = highPix > 2 ? 0x07E0 : 0xFFE0;                            // Is the battery level bar green or yellow?
@@ -245,7 +208,7 @@ void loop()
   arcada.display->drawBitmap(146, 2, battIcon, 16, 12, 0xC618);         // Redraw gray battery icon
   arcada.display->fillRect(150, 12 - highPix, 4, highPix, markColor);   // Add the level bar
 
-// Fetch 768 fresh temperature values from the MLX90640
+  // Fetch 768 fresh temperature values from the MLX90640
   arcada.display->drawBitmap(146, 18, camIcon, 16, 12, 0xF400); // Show orange camera icon during I2C acquisition
   if(mlx.getFrame(mlx90640To) != 0) {
     Serial.println("Failed");
@@ -253,7 +216,7 @@ void loop()
   }
   arcada.display->fillRect(146, 18, 12, 12, backColor);         // Acquisition done, erase camera icon
 
-// First pass: Find hottest and coldest pixels
+  // First pass: Find hottest and coldest pixels
   highAddr = lowAddr = 0;
   highPix  = lowPix  = mlx90640To[highAddr];
 
@@ -278,32 +241,54 @@ void loop()
   sneakFloats[4] = highPix;
 
 
-  // Perform bilinear interpolation
-  bilinear_interpolation(mlx90640To, terpArray); 
+  // Second pass: Scale the float values down to 8-bit and plot colormapped pixels
+  // NOTE: At the highest framerate (16fps), fillRect draw routine becomes the bottleneck since drawing 4X the number of squares as when uninterpolated (3072 vs 768) - so use orignal routine for speed
+  if (frameRate < 5) {    
+    // Perform bilinear interpolation (quadruples the number of active display points: (32x24) -> (64x48))
+    bilinear_interpolation(mlx90640To, terpArray); 
 
-
-// Second pass: Scale the float values down to 8-bit and plot colormapped pixels
-  if(mirrorFlag) {                 // Mirrored display (selfie mode)?
-    // MIRRORED: Display interpolated results
-    for(int y = 0; y < TERP_ROWS; ++y) {  // Rows count from bottom up
-      for(int x = 0 ; x < TERP_COLS ; x++) {
-        scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
-        arcada.display->fillRect(142 - x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
-        pixelArray[3 * (32 * (y>>1) + (x>>1))] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer        
+    // Plot colormapped pixels
+    if(mirrorFlag) {      
+      // MIRRORED: Display interpolated results
+      for(int y = 0; y < TERP_ROWS; ++y) {  // Rows count from bottom up
+        for(int x = 0 ; x < TERP_COLS ; x++) {
+          scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(142 - x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
+          pixelArray[3 * (MLX_COLS * (y>>1) + (x>>1))] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer        
+        }
+      }
+    } else {
+      // NOT MIRRORED: Display the interpolated results
+      for(int y = 0; y < TERP_ROWS; ++y) {
+        for(int x = 0 ; x < TERP_COLS; x++) {
+          scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(16 + x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);
+          pixelArray[3 * (MLX_COLS * (y>>1) + (x>>1))] = (uint8_t)scaledPix;
+        }
       }
     }
   } else {
-    // NOT MIRRORED: Display the interpolated results
-    for(int y = 0; y < TERP_ROWS; ++y) {
-      for(int x = 0 ; x < TERP_COLS; x++) {
-        scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
-        arcada.display->fillRect(16 + x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);
-        pixelArray[3 * (32 * (y>>1) + (x>>1))] = (uint8_t)scaledPix;
+    // Note: For highest framerate, use original, uniterpolated approach for speed (i.e. plot fewer fillRect)
+    if(mirrorFlag) {                 // Mirrored display (selfie mode)?
+      for(int y = 0; y < MLX_ROWS; ++y) {  // Rows count from bottom up
+        for(int x = 0 ; x < MLX_COLS; x++) {
+          scaledPix = constrain((mlx90640To[MLX_COLS * y + x] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(140 - x * 4, 92 - y * 4, 4, 4, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
+          pixelArray[3 * (MLX_COLS * y + x)] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer          
+        }
+      }
+    } else {  // Not mirrored
+      for(int y = 0; y < MLX_ROWS; ++y) {
+        for(int x = 0 ; x < MLX_COLS; x++) {
+          scaledPix = constrain((mlx90640To[MLX_COLS * y + x] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(16 + x * 4, 92 - y * 4, 4, 4, colorPal[(uint16_t)scaledPix]);
+          pixelArray[3 * (MLX_COLS * y + x)] = (uint8_t)scaledPix;          
+        }
       }
     }
   }
 
-// Post pass: Screen print the lowest, center, and highest temperatures
+  // Post pass: Screen print the lowest, center, and highest temperatures
   arcada.display->fillRect(  0, 96, 53, 12, colorPal[0]);                  // Contrasting mini BGs for cold temp
   arcada.display->fillRect(107, 96, 53, 12, colorPal[255]);                // and for hot temperature texts
   scaledPix = constrain((mlx90640To[400] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
@@ -348,11 +333,8 @@ void loop()
   arcada.display->setRotation(0);    // Vertical printing
   arcada.display->setCursor(48, 4);
   arcada.display->setTextColor(0xFFFF, backColor); // White text, current BG
-//  arcada.display->print("FRM ");
-//  arcada.display->print(++frameCounter);
-  arcada.display->print("SPF ");    // $$ DEBUG
-  arcada.display->print((millis() - time_1));
-
+  arcada.display->print("FRM ");
+  arcada.display->print(++frameCounter);
   arcada.display->setRotation(1);    // Back to horizontal
   
 
@@ -429,6 +411,51 @@ void loop()
 
   clickFlagMenu = clickFlagSelect = false; // End of the loop, clear all interrupt flags
 }
+
+
+// Perform bilinear interpolation to effectively quadruple the number of active display elements.
+// The MLX90640 produces an array of 32x24=768 temperature elements that get interpolated to 64x48=3072 temperature elements.
+// INPUTS:
+//    pfSource - Array holding the 768 temperature elements produced by the MLX90640.
+//    pfDest - 2D destination array holding the interpolated 3072 temperature elements.
+// RETURNS:
+//    none
+void bilinear_interpolation(float pfSource[], float pfDest[TERP_COLS][TERP_ROWS])
+{
+  float fAvg;
+  
+  // Copy source into dest making space for the intermediate pixels
+  for (uint8_t u8Row = 0; u8Row < TERP_ROWS; u8Row+= 2) {    
+    for (uint8_t u8Col = 0; u8Col < TERP_COLS; u8Col+= 2)
+      pfDest[u8Col][u8Row] = pfSource[MLX_COLS*(u8Row>>1) + (u8Col>>1)];
+  }
+
+  // Interpolate across rows (horizontal average of points on either side)
+  for (uint8_t u8Row = 0; u8Row < TERP_ROWS; u8Row+= 2) {
+    for (uint8_t u8Col = 1; u8Col < TERP_COLS-1; u8Col+= 2) {
+      // Compute average from points on either side
+      fAvg = (pfDest[u8Col-1][u8Row] + pfDest[u8Col+1][u8Row])/2.0;      
+      pfDest[u8Col][u8Row] = fAvg;
+    }  
+    
+    // Duplicate the last horizontal point since average can't be computed for it (i.e. no element to its right)
+    pfDest[TERP_COLS-1][u8Row] = fAvg;
+  }
+
+  // Interpolate columns (vertical average of points above and below) one row at a time
+  for (uint8_t u8Row = 1; u8Row < TERP_ROWS-1; u8Row+= 2) {
+    for (uint8_t u8Col = 0; u8Col < TERP_COLS; u8Col++) {
+      // Compute average of points above and below
+      fAvg = (pfDest[u8Col][u8Row-1] + pfDest[u8Col][u8Row+1])/2.0;            
+      pfDest[u8Col][u8Row] = fAvg;
+    }  
+  }  
+
+  // Duplicate the last row since average can't be computed for it (i.e. no element below it)
+  for (uint8_t u8Col = 0; u8Col < TERP_COLS; u8Col++)
+    pfDest[u8Col][TERP_ROWS-1] = pfDest[u8Col][TERP_ROWS-2];      
+}
+
 
 // Compute and fill an array with 256 16-bit color values
 void loadPalette(uint16_t palNumber) {
