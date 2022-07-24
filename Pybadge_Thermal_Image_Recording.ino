@@ -151,6 +151,7 @@ float battAverage = 0.0, colorLow = 0.0, colorHigh = 100.0;        // Values for
 volatile boolean clickFlagMenu = false, clickFlagSelect = false;   // Volatiles for timer callback handling
 
 
+void plot_thermal_image(float mlx90640[], bool interpolate);
 void bilinear_interpolation(float pfSource[], float pfDest[TERP_COLS][TERP_ROWS]);
 
 
@@ -273,48 +274,12 @@ void loop()
   // Second pass: Scale the float values down to 8-bit and plot colormapped pixels
   // NOTE: At the highest framerate, fillRect draw routine becomes the bottleneck since drawing 4X the number of squares as when uninterpolated (3072 vs 768) - so use orignal routine for speed
   if (frameRate < 5) {    
-    // Perform bilinear interpolation (quadruples the number of active display points: (32x24) -> (64x48))
-    bilinear_interpolation(mlx90640To, terpArray); 
+    // Perform bilinear interpolation and plot resulting image (quadruples the number of active display points: (32x24) -> (64x48))    
+    plot_thermal_image(mlx90640To, true);
 
-    // Plot colormapped pixels
-    if(mirrorFlag) {      
-      // MIRRORED: Display interpolated results
-      for(int y = 0; y < TERP_ROWS; ++y) {  // Rows count from bottom up
-        for(int x = 0 ; x < TERP_COLS ; x++) {
-          scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
-          arcada.display->fillRect(142 - x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
-          pixelArray[3 * (MLX_COLS * (y>>1) + (x>>1))] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer        
-        }
-      }
-    } else {
-      // NOT MIRRORED: Display the interpolated results
-      for(int y = 0; y < TERP_ROWS; ++y) {
-        for(int x = 0 ; x < TERP_COLS; x++) {
-          scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
-          arcada.display->fillRect(16 + x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);
-          pixelArray[3 * (MLX_COLS * (y>>1) + (x>>1))] = (uint8_t)scaledPix;
-        }
-      }
-    }
   } else {
-    // Note: For highest framerate, use original, uniterpolated approach for speed (i.e. plot fewer fillRect)
-    if(mirrorFlag) {                 // Mirrored display (selfie mode)?
-      for(int y = 0; y < MLX_ROWS; ++y) {  // Rows count from bottom up
-        for(int x = 0 ; x < MLX_COLS; x++) {
-          scaledPix = constrain((mlx90640To[MLX_COLS * y + x] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
-          arcada.display->fillRect(140 - x * 4, 92 - y * 4, 4, 4, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
-          pixelArray[3 * (MLX_COLS * y + x)] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer          
-        }
-      }
-    } else {  // Not mirrored
-      for(int y = 0; y < MLX_ROWS; ++y) {
-        for(int x = 0 ; x < MLX_COLS; x++) {
-          scaledPix = constrain((mlx90640To[MLX_COLS * y + x] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
-          arcada.display->fillRect(16 + x * 4, 92 - y * 4, 4, 4, colorPal[(uint16_t)scaledPix]);
-          pixelArray[3 * (MLX_COLS * y + x)] = (uint8_t)scaledPix;          
-        }
-      }
-    }
+    // Note: For highest framerates, use original, uniterpolated approach for speed (i.e. plot fewer fillRect)
+    plot_thermal_image(mlx90640To, false);
   }
 
   // Post pass: Screen print the lowest, center, and highest temperatures
@@ -394,6 +359,10 @@ void loop()
 
     if(buttonRfunc == 0) {                                           // Freeze requested?
       arcada.display->drawBitmap(146, 48, snowIcon, 16, 12, 0xC61F); // Freeze icon on
+
+      // Perform bilinear interpolation and plot resulting image (quadruples the number of active display points: (32x24) -> (64x48))    
+      plot_thermal_image(mlx90640To, true);
+   
       while(buttonBits & ARCADA_BUTTONMASK_A)                        // Naive freeze: loop until button released
         delay(10);                                                   // Short pause
       deBounce = millis() + DE_BOUNCE;                               // Restart debounce timer
@@ -450,6 +419,64 @@ void loop()
     buttonActive = false;                // Clear flag to allow another button press
 
   clickFlagMenu = clickFlagSelect = false; // End of the loop, clear all interrupt flags
+}
+
+
+// Plot a raw or interpolated image from the thermal data. 
+// NOTE: Empirically tested that interplotion can be performed for 4 frames-per-sec and slower in "real time".  At higher framerates, interpolation negatively impacts frame rate.
+// INPUTS:
+//    mlx90640 - Array of floats holding the 768 temperature elements produced by the MLX90640.
+//    interpolate - true: perform bilinear interpolation on raw thermal data and display; false: display raw thermal image data.
+// RETURNS:
+//    none
+void plot_thermal_image(float mlx90640[], bool interpolate)
+{
+  float scaledPix;
+  
+  if (interpolate) {
+    // Perform bilinear interpolation (quadruples the number of active display points: (32x24) -> (64x48))
+    bilinear_interpolation(mlx90640, terpArray); 
+
+    // Plot colormapped pixels
+    if(mirrorFlag) {      
+      // MIRRORED: Display interpolated results
+      for(int y = 0; y < TERP_ROWS; ++y) {  // Rows count from bottom up
+        for(int x = 0 ; x < TERP_COLS ; x++) {
+          scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(142 - x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
+          pixelArray[3 * (MLX_COLS * (y>>1) + (x>>1))] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer        
+        }
+      }
+    } else {
+      // NOT MIRRORED: Display the interpolated results
+      for(int y = 0; y < TERP_ROWS; ++y) {
+        for(int x = 0 ; x < TERP_COLS; x++) {
+          scaledPix = constrain((terpArray[x][y] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(16 + x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)scaledPix]);
+          pixelArray[3 * (MLX_COLS * (y>>1) + (x>>1))] = (uint8_t)scaledPix;
+        }
+      }
+    }
+  } else {
+    // Note: For highest framerate, use original, uniterpolated approach for speed (i.e. plot fewer fillRect)
+    if(mirrorFlag) {                 // Mirrored display (selfie mode)?
+      for(int y = 0; y < MLX_ROWS; ++y) {  // Rows count from bottom up
+        for(int x = 0 ; x < MLX_COLS; x++) {
+          scaledPix = constrain((mlx90640[MLX_COLS * y + x] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(140 - x * 4, 92 - y * 4, 4, 4, colorPal[(uint16_t)scaledPix]);  // Filled rectangles, bottom up
+          pixelArray[3 * (MLX_COLS * y + x)] = (uint8_t)scaledPix;                           // Store as a byte in BMP buffer          
+        }
+      }
+    } else {  // Not mirrored
+      for(int y = 0; y < MLX_ROWS; ++y) {
+        for(int x = 0 ; x < MLX_COLS; x++) {
+          scaledPix = constrain((mlx90640[MLX_COLS * y + x] - colorLow) / (colorHigh - colorLow) * 255.9, 0.0, 255.0);
+          arcada.display->fillRect(16 + x * 4, 92 - y * 4, 4, 4, colorPal[(uint16_t)scaledPix]);
+          pixelArray[3 * (MLX_COLS * y + x)] = (uint8_t)scaledPix;          
+        }
+      }
+    }
+  }
 }
 
 
@@ -569,6 +596,7 @@ void loadPalette(uint16_t palNumber) {
   }
 }
 
+
 void setColorRange(int presetIndex) { // Set coldest/hottest values in color range
   switch(presetIndex) {
     case 1:  // Standard range, from FLIR document: 50F to 90F
@@ -597,6 +625,7 @@ void setColorRange(int presetIndex) { // Set coldest/hottest values in color ran
       break;
   }
 }
+
 
 // Draw the stationary screen elements behind the live camera window
 void setBackdrop(uint16_t bgColor, uint16_t buttonFunc) {
@@ -634,6 +663,7 @@ void setBackdrop(uint16_t bgColor, uint16_t buttonFunc) {
   }
 }
 
+
 void prepForSave() {
   for(int x = 0; x < 768; ++x)
     pixelArray[3 * x + 2] = pixelArray[3 * x + 1] = pixelArray[3 * x];  // Copy each blue byte into R & G for 256 grays in 24 bits
@@ -646,6 +676,7 @@ void prepForSave() {
   }
 }
 
+
 boolean newDirectory() { // Create a subdirectory, converting the name between char arrays and string objects
   char fileArray[64];
   String fullPath;
@@ -654,6 +685,7 @@ boolean newDirectory() { // Create a subdirectory, converting the name between c
   fullPath = BOTTOM_DIR + String(fileArray);    // Make a filepath out of it, then
   return arcada.mkdir(fullPath.c_str());        // try to make a real subdirectory from it
 }
+
 
 // Here we write the actual bytes of a BMP file (plus extras) to flash media
 boolean writeBMP() {
@@ -709,13 +741,14 @@ boolean writeBMP() {
   }
 }
 
+
 void recallLastBMP(uint16_t bgColor) {  // Display 8-bit values left in buffer from the last BMP save
   int counter1, counter2;
   boolean exitFlag = false;
 
   setBackdrop(bgColor, 4);  // Clear screen, just a color palette & "A:EXIT" in the BG
 
-  // Restore values from pixelArray back to mlx buffer for interpolation
+  // Restore values from pixelArray (which are already scaled for thermal range) back to mlx buffer for interpolation
   for (uint16_t u16Index = 0; u16Index < MLX_ROWS*MLX_COLS; u16Index++)      
     mlx90640To[u16Index] = pixelArray[3*u16Index + 2];
 
@@ -725,6 +758,7 @@ void recallLastBMP(uint16_t bgColor) {  // Display 8-bit values left in buffer f
   // NOT MIRRORED: Display the interpolated results
   for(int y = 0; y < TERP_ROWS; ++y) {
     for(int x = 0 ; x < TERP_COLS; x++) {
+      // NOTE: The data is already scaled for the thermal range, so we don't need to compute 'scaledPix' here
       arcada.display->fillRect(16 + x * 2, 94 - y * 2, 2, 2, colorPal[(uint16_t)terpArray[x][y]]);
     }
   }
@@ -742,6 +776,7 @@ void recallLastBMP(uint16_t bgColor) {  // Display 8-bit values left in buffer f
   }
 }
 
+
 uint16_t availableFileNumber(uint16_t startNumber, String formatBase) { // Find unclaimed serial number for file series
   uint16_t counter1;
   char nameArray[80];
@@ -753,6 +788,7 @@ uint16_t availableFileNumber(uint16_t startNumber, String formatBase) { // Find 
   }
   return 0; // Loop finished, no free number found, return fail
 }
+
 
 boolean menuLoop(uint16_t bgColor) {  // Lay out a menu screen, interact to change values
   int counter1 = 0, scrollPosition = 0;
@@ -862,6 +898,7 @@ boolean menuLoop(uint16_t bgColor) {  // Lay out a menu screen, interact to chan
   }
   return(settingsChanged);
 }
+
 
 void menuLines(int lineNumber, int scrollPos) {  // Screen print a single line in the settings menu
 
@@ -973,6 +1010,7 @@ void menuLines(int lineNumber, int scrollPos) {  // Screen print a single line i
     }
   }
 }
+
 
 // This is the function that substitutes for GPIO external interrupts
 // It will check for A and B button presses at 50Hz
